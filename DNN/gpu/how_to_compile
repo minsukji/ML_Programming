@@ -1,0 +1,5 @@
+nvcc --device-c -std=c++14 -Xcompiler -fPIC $(python3 -m pybind11 --includes) dnn_engine_gpu_pybind.cu dnn_engine_gpu.cu
+nvcc -shared dnn_engine_gpu_pybind.o dnn_engine_gpu.o -lcublas -lcurand -o dnn_engine_pybind.so
+
+nvcc --device-c -std=c++14 dnn_engine_gpu_test.cu dnn_engine_gpu.cu
+nvcc dnn_engine_gpu_test.o dnn_engine_gpu.o -lcublas -lcurand -o dnn_engine_gpu_test
