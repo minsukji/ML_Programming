@@ -1,18 +1,22 @@
+.PHONY : all clean
 CXX=g++
-IDIR=-I/home/mji/.local/include $(shell python3 -m pybind11 --includes) -I.
-DEPS=dnn_engine.h
-CXXFLAGS=-c -std=c++14 -Wall -march=native -fPIC -O3 -fopenmp $(IDIR)
-LDFLAGS=-shared -fopenmp
-SRC=$(wildcard *.cpp)
-OBJ=$(SRC:.cpp=.o)
 
-%.o: %.cpp $(DEPS)
-	$(CXX) $(CXXFLAGS) $< -o $@
+all : engine test
 
-dnn_engine_pybind: $(OBJ)
-	$(CXX) $(LDFLAGS) $^ -o $@.so
+engine : dnn_engine_pybind.o dnn_engine.o
+	$(CXX) -shared -fopenmp dnn_engine_pybind.o dnn_engine.o -o dnn_engine_pybind.so
 
-.PHONY: clean
+test :
+	$(CXX) -I/home/mji/.local/include dnn_engine_test.cpp dnn_engine.cpp -pthread -lgtest -o dnn_engine_test
 
-clean:
-	rm -f $(OBJ)
+dnn_engine.o : dnn_engine.cpp
+	$(CXX) -c -std=c++14 -march=native -fPIC -O3 -fopenmp -I/home/mji/.local/include $^
+
+dnn_engine_pybind.o : dnn_engine_pybind.cpp dnn_engine.h
+	$(CXX) -c -std=c++14 -march=native -fPIC -O3 -fopenmp -I/home/mji/.local/include $(shell python3 -m pybind11 --includes) $<
+
+dnn_engine_test.o : dnn_engine_test.cpp dnn_engine.h
+	$(CXX) -c -std=c++14 -I/home/mji/.local/include $<
+
+clean :
+	rm -f *.o dnn_engine_pybind.so dnn_engine_test
