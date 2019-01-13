@@ -2,8 +2,10 @@
 #include "cublas_v2.h"
 #include <iostream>
 #include <curand.h>
+#include <cmath> // for log in ComputeCostSerial
+#include <random> /// for InitParamsSerial
 
-constexpr int nThreads {1024};
+constexpr int nThreads {64};
 
 // Apply sigmoid function element-wise to a matrix.
 __global__
@@ -12,6 +14,7 @@ void SigmoidCuda(const float *Z, const int n, float *A)
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n)
         A[i] = 1.0f / (1.0f + expf(-Z[i]));
+        //A[i] = fmaxf(0.0f, 1.0f / (1.0f + expf(-Z[i])));
 }
 
 // Apply rectified-linear-unit function element-wise to a matrix.
@@ -51,16 +54,18 @@ __global__
 void InitParams2Cuda(float *W, const int n, const int divisor) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n)
-        W[i] /= static_cast<float>(divisor);
+        W[i] *= sqrtf(2.0f / static_cast<float>(divisor));
 }
-
 
 // Randomly initialize parameters (W matrix and b vector) of each layer of DNN.
 // layer_dims contains the number of activations from input to output layer.
 void InitParamsCuda(const int *layer_dims, const int num_layers, const int *W_index, float *W, float *B) {
     //curandStatus_t stat;
     curandGenerator_t gen;
-    curandCreateGenerator(&gen, CURAND_RNG_QUASI_DEFAULT);
+    //curandCreateGenerator(&gen, CURAND_RNG_QUASI_DEFAULT);
+    curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT);
+    curandSetPseudoRandomGeneratorSeed(gen, 21ULL);
+    //curandSetPseudoRandomGeneratorSeed(gen, 12345ULL);
     //stat = curandGenerateNormal(gen, W, W_index[num_layers], 0.0f, 1.0f);
     curandGenerateNormal(gen, W, W_index[num_layers], 0.0f, 1.0f);
     //if (stat == CURAND_STATUS_SUCCESS) std::cout << "Success" << '\n';
@@ -70,12 +75,33 @@ void InitParamsCuda(const int *layer_dims, const int num_layers, const int *W_in
     //if (stat == CURAND_STATUS_LENGTH_NOT_MULTIPLE) std::cout << "Length not multiple" << '\n';
     //stat = curandGenerateNormal(gen, B, 33, 0.0f, 0.0f);
     //curandGenerateNormal(gen, B, 33, 0.0f, 0.0f);
-    curandDestroyGenerator(gen);
 
     for (int i = 1; i <= num_layers; ++i) {
+        //curandGenerateNormal(gen, W+W_index[i-1], W_index[i]-W_index[i-1], 0.0f, 1.0f);
         int nBlocks = ((W_index[i] - W_index[i-1]) + nThreads - 1) / nThreads;
         InitParams2Cuda<<<nBlocks, nThreads>>>(W+W_index[i-1], W_index[i] - W_index[i-1], layer_dims[i-1]);
     }
+    curandDestroyGenerator(gen);
+}
+
+void InitParamsSerial(const int *layer_dims, const int num_layers, const int *W_index, float *W, float *B)
+{
+    float *local_W = new float[W_index[num_layers]] {};
+    std::random_device rd;
+    std::mt19937 e2(rd());
+    //std::mt19937 e2(0);
+    std::normal_distribution<> dist(0.0f, 1.0f);
+
+    for (int l = 1; l <= num_layers; ++l) {
+        int size = W_index[l] - W_index[l-1];
+        int start_index = W_index[l-1];
+        for (int i = start_index; i < start_index+size; ++i) {
+            local_W[i] = dist(e2) / sqrt(static_cast<float>(layer_dims[l-1])); 
+        }
+    }
+
+    cudaMemcpy(W, local_W, W_index[num_layers] * sizeof(float), cudaMemcpyHostToDevice);
+    delete[] local_W;
 }
 
 // Carry out forward propagation.
@@ -128,6 +154,9 @@ void ForwardCuda(const float *X, const float *W, const float *B, const float *ro
     cublasDestroy(handle);
 }
 
+// ComputeCostCuda2 does NOT give the right answer. For example, its results are dependent on nThreads
+// Not sure if it's the shared memory issue or atomic issue or something else.
+// ComputeCostCuda3 below works.
 __global__
 void ComputeCostCuda2(const float *AL, const int *Y, const int n_samples, float *d_cost) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
@@ -135,9 +164,12 @@ void ComputeCostCuda2(const float *AL, const int *Y, const int n_samples, float 
         *d_cost = 0.0f;
 
     __shared__ float temp[nThreads];
-    if (i < n_samples)
-        //temp[threadIdx.x] = static_cast<float>(Y[i]) * logf(AL[i]) + (1.0f - static_cast<float>(Y[i])) * logf(1.0f - AL[i]);
-        temp[threadIdx.x] = static_cast<float>(Y[i]) * logf(AL[i]) + static_cast<float>((1 - Y[i])) * logf(1.0f - AL[i]);
+    if (i < n_samples) {
+        if (Y[i] == 0)
+            temp[threadIdx.x] = -logf(1.0f - AL[i]);
+        else if (Y[i] == 1)
+            temp[threadIdx.x] = -logf(AL[i]);
+    }
 
     __syncthreads();
 
@@ -147,17 +179,58 @@ void ComputeCostCuda2(const float *AL, const int *Y, const int n_samples, float 
         //for (int j = 0; j < nThreads; ++j)
         for (int j = 0; j < index; ++j)
             sum += temp[j];
-        sum /= -static_cast<float>(n_samples);
+        sum /= static_cast<float>(n_samples);
         atomicAdd(d_cost, sum);
     }
 }
 
+__global__
+void ComputeCostCuda3(const float *AL, const int *Y, const int n_samples, float *d_cost) {
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if (i < n_samples) {
+        if (Y[i] == 0)
+            d_cost[i] = -logf(1.0f - AL[i]);
+        else if (Y[i] == 1)
+            d_cost[i] = -logf(AL[i]);
+    }
+}
 // Given AL (output layer activation) and Y (), compute the cost function (cross entropy).
 void ComputeCostCuda(const float *AL, const int *Y, const int n_samples, float *cost, float *d_cost)
 {
     int nBlocks = (n_samples + nThreads - 1) / nThreads;
-    ComputeCostCuda2<<<nBlocks, nThreads>>>(AL, Y, n_samples, d_cost);
-    cudaMemcpy(cost, d_cost, sizeof(float), cudaMemcpyDeviceToHost);
+    // Using ComputeCostCuda2
+    //ComputeCostCuda2<<<nBlocks, nThreads>>>(AL, Y, n_samples, d_cost);
+    //cudaMemcpy(cost, d_cost, sizeof(float), cudaMemcpyDeviceToHost);
+
+    // Using ComputeCostCuda3
+    ComputeCostCuda3<<<nBlocks, nThreads>>>(AL, Y, n_samples, d_cost);
+    cublasHandle_t handle;
+    cublasCreate(&handle);
+    cublasSasum(handle, n_samples, d_cost, 1, cost);
+    cublasDestroy(handle);
+    *cost /= n_samples;
+
+}
+
+void ComputeCostSerial(const float *AL, const int *Y, const int n_samples, float *cost, float *d_cost)
+{
+    float *local_AL = new float[n_samples] {};
+    int *local_Y = new int[n_samples] {};
+    cudaMemcpy(local_AL, AL, n_samples * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(local_Y, Y, n_samples * sizeof(float), cudaMemcpyDeviceToHost);
+
+    float sum {0.0f};
+    float temp {0.0f};
+    for (int i = 0; i < n_samples; ++i) {
+        if (local_Y[i] == 0)
+            temp = -std::log(1.0f - local_AL[i]);
+        else if (local_Y[i] == 1)
+            temp = -std::log(local_AL[i]);
+        sum += temp;
+    }
+
+    *cost = sum / static_cast<float>(n_samples);
+    delete[] local_AL; delete[] local_Y;
 }
 
 __global__
