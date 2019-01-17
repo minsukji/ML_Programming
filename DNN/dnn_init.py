@@ -44,23 +44,21 @@ elif option == "2":
     test_y_c = np.array(test_y, dtype='int32', order='F')
     predict = dnn_cpp.predict(test_x_c, test_y_c, parameters)
 
-if option=="3":
+elif option=="3":
     layer_dims = np.array([[12288], [20], [7], [5], [1]], dtype='int32', order='F')
+    layer_dropouts = np.array([[1.0], [1.0], [1.0], [1.0], [1.0]], dtype='float32', order='F')
     train_x_c = np.array(train_x, dtype='float32', order='F')
     #print(train_x_c.shape)
     train_y_c = np.array(train_y, dtype='int32', order='F')
     #print(train_y_c.shape)
-    #parameters = dnn_cpp.l_layer_model(train_x_c, train_y_c, layer_dims, 0.0075, 3000, True)
-    W, B = dnn_gpu.l_layer_model_gpu(train_x_c, train_y_c, layer_dims, 4, 0.0075, 2500, True)
-    #W, B = dnn_gpu.l_layer_model_gpu(train_x_c, train_y_c, layer_dims, 4, print_cost=True)
-
-    #W = np.array(tW, dtype='float32', order='F')
-    #B = np.array(tB, dtype='float32', order='F')
+    lamda = 0.1
+    W, B = dnn_gpu.l_layer_model_gpu(train_x_c, train_y_c, layer_dims, layer_dropouts, 4, lamda, 0.0075, 3500, True)
 
     test_x_c = np.array(test_x, dtype='float32', order='F')
     test_y_c = np.array(test_y, dtype='int32', order='F')
-    predict = dnn_gpu.predict(test_x_c, test_y_c, W, B, layer_dims, 4)
-    #predict = dnn_gpu.predict(train_x_c, train_y_c, W, B, layer_dims, 4)
-    #print(predict.shape)
-    #print(predict)
-    #print(test_y_c)
+    layer_dropouts = np.array([[1.0], [1.0], [1.0], [1.0], [1.0]], dtype='float32', order='F')
+    predict = dnn_gpu.predict(test_x_c, test_y_c, W, B, layer_dims, layer_dropouts, 4, 0.0)
+    #predict = dnn_gpu.predict(train_x_c, train_y_c, W, B, layer_dims, layer_dropouts, 4, 0.0)
+    ##print(predict.shape)
+    ##print(predict)
+    ##print(test_y_c)

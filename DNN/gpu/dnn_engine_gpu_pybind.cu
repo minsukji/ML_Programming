@@ -11,17 +11,30 @@ namespace py = pybind11;
 py::tuple l_layer_model_gpu(py::array_t<float, py::array::f_style | py::array::forcecast> iX,
                             py::array_t<int, py::array::f_style | py::array::forcecast> iY,
                             py::array_t<int, py::array::f_style | py::array::forcecast> ilayer_dims,
-                            int num_layers, float learning_rate=0.0075, int num_iterations=3000, bool print_cost=false)
+                            py::array_t<float, py::array::f_style | py::array::forcecast> ilayer_dropouts,
+                            int num_layers, float lambda, float learning_rate=0.0075,
+                            int num_iterations=3000, bool print_cost=false)
 {
     // X and Y matrices.
-    // These come from Python calling function, and are copied to GPU memory.
+    // These come from Python calling function
     py::buffer_info bufX = iX.request();
     py::buffer_info bufY = iY.request();
     py::buffer_info bufLayer_dims = ilayer_dims.request();
+    py::buffer_info bufLayer_dropouts = ilayer_dropouts.request();
     int n_samples = static_cast<int>(bufX.shape[1]);
     float *X = static_cast<float *>(bufX.ptr);
     int *Y = static_cast<int *>(bufY.ptr);
     int *layer_dims = static_cast<int *>(bufLayer_dims.ptr);
+    float *layer_dropouts = static_cast<float *>(bufLayer_dropouts.ptr);
+
+    // Check if dropout regularization is applied. Dropout is not applied to input or output layer.
+    bool dropout {false};
+    for (int l = 1; l < num_layers; ++l) {
+        if (layer_dropouts[l] < 1.0f) {
+            dropout = true;
+            break;
+        }
+    } 
 
     // W, dW, Z, dZ, A, dA matrices & B, dB vector.
     // These are allocated on GPU memory for computation.
@@ -36,7 +49,7 @@ py::tuple l_layer_model_gpu(py::array_t<float, py::array::f_style | py::array::f
     float *oneVec = new float[n_samples]{};
     std::fill(oneVec, oneVec+n_samples, 1.0f);
 
-    float *d_X, *d_oneVec, *d_W, *d_B, *d_Z, *d_A, *d_dW, *d_dB, *d_dZ, *d_dA, *d_cost;
+    float *d_X, *d_oneVec, *d_W, *d_B, *d_Z, *d_A, *d_D, *d_dW, *d_dB, *d_dZ, *d_dA, *d_cost;
     int *d_Y;
     cudaMalloc(&d_X,  layer_dims[0] * n_samples * sizeof(float));
     cudaMalloc(&d_Y,  n_samples * sizeof(int));
@@ -45,6 +58,7 @@ py::tuple l_layer_model_gpu(py::array_t<float, py::array::f_style | py::array::f
     cudaMalloc(&d_B,  B_index[num_layers] * sizeof(float));
     cudaMalloc(&d_Z,  Z_index[num_layers] * sizeof(float));
     cudaMalloc(&d_A,  Z_index[num_layers] * sizeof(float));
+    cudaMalloc(&d_D,  Z_index[num_layers] * sizeof(float)); // This is for dropout regularization
     cudaMalloc(&d_dW, W_index[num_layers] * sizeof(float));
     cudaMalloc(&d_dB, B_index[num_layers] * sizeof(float));
     cudaMalloc(&d_dZ, Z_index[num_layers] * sizeof(float));
@@ -52,7 +66,6 @@ py::tuple l_layer_model_gpu(py::array_t<float, py::array::f_style | py::array::f
     //cudaMalloc(&d_cost, sizeof(float)); // THIS IS FOR USING MANUAL CUDA COST CALCULATION (ComputeCostCuda2)
     cudaMalloc(&d_cost, n_samples * sizeof(float)); // THIS IS FOR USING CUBLAS (ComputeCostCuda3)
     
-
     cudaMemcpy(d_X, X, layer_dims[0] * n_samples * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_Y, Y, n_samples * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_oneVec, oneVec, n_samples * sizeof(float), cudaMemcpyHostToDevice);
@@ -62,15 +75,17 @@ py::tuple l_layer_model_gpu(py::array_t<float, py::array::f_style | py::array::f
 
     InitParamsCuda(layer_dims, num_layers, W_index, d_W, d_B);
     //InitParamsSerial(layer_dims, num_layers, W_index, d_W, d_B);
+
     for (int i = 0; i < num_iterations; ++i)
     {
-        ForwardCuda(d_X, d_W, d_B, d_oneVec, layer_dims, num_layers, n_samples, W_index, B_index, Z_index, d_Z, d_A);
+        ForwardCuda(d_X, d_W, d_B, d_oneVec, layer_dims, layer_dropouts, dropout, num_layers, n_samples,
+                    W_index, B_index, Z_index, d_Z, d_A, d_D);
 
-        ComputeCostCuda(d_A+Z_index[num_layers-1], d_Y, n_samples, cost, d_cost);
+        ComputeCostCuda(d_A+Z_index[num_layers-1], d_Y, n_samples, d_W, W_index, num_layers, lambda, cost, d_cost);
         //ComputeCostSerial(d_A+Z_index[num_layers-1], d_Y, n_samples, cost, d_cost);
 
-        BackwardCuda(d_W, d_B, d_Z, d_A, d_X, d_Y, d_oneVec, layer_dims, num_layers, n_samples, W_index, B_index, Z_index,
-                     d_dW, d_dB, d_dZ, d_dA);
+        BackwardCuda(d_W, d_B, d_Z, d_A, d_X, d_Y, d_oneVec, layer_dims, layer_dropouts, dropout,
+                     num_layers, n_samples, lambda, W_index, B_index, Z_index, d_dW, d_dB, d_dZ, d_dA, d_D);
 
         UpdateParamsCuda(learning_rate, W_index[num_layers], B_index[num_layers], d_dW, d_dB, d_W, d_B);
 
@@ -90,7 +105,7 @@ py::tuple l_layer_model_gpu(py::array_t<float, py::array::f_style | py::array::f
     cudaMemcpy(B, d_B, B_index[num_layers]*sizeof(float), cudaMemcpyDeviceToHost);
 
     cudaFree(d_X); cudaFree(d_Y); cudaFree(d_oneVec); cudaFree(d_W); cudaFree(d_B); cudaFree(d_Z); cudaFree(d_A);
-    cudaFree(d_dW); cudaFree(d_dB), cudaFree(d_dZ), cudaFree(d_dA); cudaFree(d_cost);
+    cudaFree(d_D); cudaFree(d_dW); cudaFree(d_dB), cudaFree(d_dZ), cudaFree(d_dA); cudaFree(d_cost);
 
     delete[] W_index; delete[] B_index; delete[] Z_index; delete[] cost;
 
@@ -102,7 +117,8 @@ py::array_t<float> predict(py::array_t<float, py::array::f_style | py::array::fo
              py::array_t<float, py::array::f_style | py::array::forcecast> iW,
              py::array_t<float, py::array::f_style | py::array::forcecast> iB,
              py::array_t<int, py::array::f_style | py::array::forcecast> ilayer_dims,
-             int num_layers)
+             py::array_t<float, py::array::f_style | py::array::forcecast> ilayer_dropouts,
+             int num_layers, float lambda)
 {
     // X and Y matrices.
     // These come from Python calling function, and are copied to GPU memory.
@@ -111,12 +127,14 @@ py::array_t<float> predict(py::array_t<float, py::array::f_style | py::array::fo
     py::buffer_info bufW = iW.request();
     py::buffer_info bufB = iB.request();
     py::buffer_info bufLayer_dims = ilayer_dims.request();
+    py::buffer_info bufLayer_dropouts = ilayer_dropouts.request();
     int n_samples = static_cast<int>(bufX.shape[1]);
     float *X = static_cast<float *>(bufX.ptr);
     int *Y = static_cast<int *>(bufY.ptr);
     float *W = static_cast<float *>(bufW.ptr);
     float *B = static_cast<float *>(bufB.ptr);
     int *layer_dims = static_cast<int *>(bufLayer_dims.ptr);
+    float *layer_dropouts = static_cast<float *>(bufLayer_dropouts.ptr);
 
     // W, Z, A matrices & B vector.
     // These are allocated on GPU memory for computation.
@@ -131,20 +149,22 @@ py::array_t<float> predict(py::array_t<float, py::array::f_style | py::array::fo
     float *oneVec = new float[n_samples]{};
     std::fill(oneVec, oneVec+n_samples, 1.0f);
 
-    float *d_X, *d_oneVec, *d_W, *d_B, *d_Z, *d_A;
+    float *d_X, *d_oneVec, *d_W, *d_B, *d_Z, *d_A, *d_D;
     cudaMalloc(&d_X,  layer_dims[0] * n_samples * sizeof(float));
     cudaMalloc(&d_oneVec, n_samples * sizeof(float));
     cudaMalloc(&d_W,  W_index[num_layers] * sizeof(float));
     cudaMalloc(&d_B,  B_index[num_layers] * sizeof(float));
     cudaMalloc(&d_Z,  Z_index[num_layers] * sizeof(float));
     cudaMalloc(&d_A,  Z_index[num_layers] * sizeof(float));
+    cudaMalloc(&d_D,  Z_index[num_layers] * sizeof(float)); // This is for dropout regularization
 
     cudaMemcpy(d_X, X, layer_dims[0] * n_samples * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_W, W, W_index[num_layers] * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, B, B_index[num_layers] * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_oneVec, oneVec, n_samples * sizeof(float), cudaMemcpyHostToDevice);
 
-    ForwardCuda(d_X, d_W, d_B, d_oneVec, layer_dims, num_layers, n_samples, W_index, B_index, Z_index, d_Z, d_A);
+    ForwardCuda(d_X, d_W, d_B, d_oneVec, layer_dims, layer_dropouts, false, num_layers, n_samples,
+                W_index, B_index, Z_index, d_Z, d_A, d_D);
     
     auto pred = py::array_t<float, py::array::f_style | py::array::forcecast>(Z_index[num_layers]);
     py::buffer_info bufPred = pred.request();
@@ -174,7 +194,8 @@ py::array_t<float> predict(py::array_t<float, py::array::f_style | py::array::fo
 
 PYBIND11_MODULE(dnn_engine_pybind, m) {
     m.def("l_layer_model_gpu", &l_layer_model_gpu, py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(),
-          py::arg().noconvert(), py::arg("learning_rate")=0.0075, py::arg("num_iterations")=3000, py::arg("print_cost")=false);
+          py::arg().noconvert(), py::arg().noconvert(), py::arg().noconvert(), py::arg("learning_rate")=0.0075,
+          py::arg("num_iterations")=3000, py::arg("print_cost")=false);
 
     m.def("predict", &predict);
 }

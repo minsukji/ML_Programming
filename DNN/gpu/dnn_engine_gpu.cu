@@ -104,11 +104,24 @@ void InitParamsSerial(const int *layer_dims, const int num_layers, const int *W_
     delete[] local_W;
 }
 
+__global__
+void DropOutCuda(const float keep_prob, const int n, float *A, const float *D)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        if (D[i] > keep_prob)
+            A[i] = 0.0f;
+        else
+            A[i] /= keep_prob;
+    }
+}
+
 // Carry out forward propagation.
 // Arguments are matrix X (input data) and params.
-void ForwardCuda(const float *X, const float *W, const float *B, const float *rowVec, const int *layer_dims, const int num_layers,
-                 const int n_samples, const int *W_index, const int *B_index, const int *Z_index, float *Z, float *A) {
-    
+void ForwardCuda(const float *X, const float *W, const float *B, const float *rowVec, const int *layer_dims,
+                 const float *layer_dropouts, const bool dropout, const int num_layers, const int n_samples,
+                 const int *W_index, const int *B_index, const int *Z_index, float *Z, float *A, float *D)
+{
     int m, n, k, lda, ldb, ldc;
     float alf = 1.0f;
     float bet = 0.0f;
@@ -120,6 +133,22 @@ void ForwardCuda(const float *X, const float *W, const float *B, const float *ro
     cublasHandle_t handle;
     cublasCreate(&handle);
     cublasStatus_t stat;
+
+    // If dropout is applied, generate a random vector D that masks A vector.
+    // This randomness changes at every iteration; thus generated everytime ForwardCuda is called.
+    // Also, the device memory D with generated random numbers will be used by BackwardCuda.
+    static int index {0};
+    if (dropout) {
+        curandGenerator_t gen;
+        curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT);
+        curandSetPseudoRandomGeneratorSeed(gen, 101ULL);
+        //curandSetGeneratorOffset(gen, index * Z_index[num_layers]); //OFFSET
+        curandGenerateUniform(gen, D, Z_index[num_layers]);
+        curandDestroyGenerator(gen);
+        index++;
+    }
+
+    // Perform forward propagation from layer 1 to output layer
     for (int l = 1; l <= num_layers; ++l) {
         W_curLoc = W_index[l-1];
         B_curLoc = B_index[l-1];
@@ -133,24 +162,34 @@ void ForwardCuda(const float *X, const float *W, const float *B, const float *ro
         lda = m;
         ldb = k;
         ldc = m;
-       
+
+        // Compute Z (Linear computation)
+        // 1. W[l] * A[l-1]
         if (l == 1) 
             stat=cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, alpha, W+W_curLoc, lda, X, ldb, beta, Z+Z_curLoc, ldc);
         else
             stat=cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, alpha, W+W_curLoc, lda, A+Z_lasLoc, ldb, beta, Z+Z_curLoc, ldc);
         if (stat != CUBLAS_STATUS_SUCCESS) std::cout << "PROBLEM" << '\n';
-
+        // 2. W[l] * A[l-1] + B[l]
         stat=cublasSger(handle, m, n, alpha, B+B_curLoc, incx, rowVec, incy, Z+Z_curLoc, lda);
         if (stat != CUBLAS_STATUS_SUCCESS) std::cout << "PROBLEM" << '\n';
 
+        // Compute A (Non-linear computation)
         int nBlocks = (m*n + nThreads - 1) / nThreads;
         if (l < num_layers)
-            ReluCuda<<<nBlocks, nThreads>>>(Z+Z_curLoc, m*n, A+Z_curLoc); // Relu(W * X + B)
+            ReluCuda<<<nBlocks, nThreads>>>(Z+Z_curLoc, m*n, A+Z_curLoc); // Relu(W * A + B)
         else if (l == num_layers)
-            SigmoidCuda<<<nBlocks, nThreads>>>(Z+Z_curLoc, m*n, A+Z_curLoc); // Sigmoid(W * X + B)
+            SigmoidCuda<<<nBlocks, nThreads>>>(Z+Z_curLoc, m*n, A+Z_curLoc); // Sigmoid(W * A + B)
+
+        // Apply dropout regularization
+        if (dropout && layer_dropouts[l] < 1.0f) {
+            float keep_prob = layer_dropouts[l];
+            DropOutCuda<<<nBlocks, nThreads>>>(keep_prob, m*n, A+Z_curLoc, D+Z_curLoc);
+        }
 
         Z_lasLoc = Z_curLoc;
     }
+
     cublasDestroy(handle);
 }
 
@@ -194,10 +233,15 @@ void ComputeCostCuda3(const float *AL, const int *Y, const int n_samples, float 
             d_cost[i] = -logf(AL[i]);
     }
 }
+
 // Given AL (output layer activation) and Y (), compute the cost function (cross entropy).
-void ComputeCostCuda(const float *AL, const int *Y, const int n_samples, float *cost, float *d_cost)
+// If L2 regularization, add the regularization component to the cost.
+void ComputeCostCuda(const float *AL, const int *Y, const int n_samples, const float *W,
+                     const int *W_index, const int num_layers, const float lambda,
+                     float *cost, float *d_cost)
 {
     int nBlocks = (n_samples + nThreads - 1) / nThreads;
+
     // Using ComputeCostCuda2
     //ComputeCostCuda2<<<nBlocks, nThreads>>>(AL, Y, n_samples, d_cost);
     //cudaMemcpy(cost, d_cost, sizeof(float), cudaMemcpyDeviceToHost);
@@ -207,9 +251,16 @@ void ComputeCostCuda(const float *AL, const int *Y, const int n_samples, float *
     cublasHandle_t handle;
     cublasCreate(&handle);
     cublasSasum(handle, n_samples, d_cost, 1, cost);
-    cublasDestroy(handle);
     *cost /= n_samples;
 
+    // L2 Regularization
+    if (lambda != 0.0f) {
+        float *result = new float {0};
+        cublasSdot(handle, W_index[num_layers], W, 1, W, 1, result); 
+        *result = *result * 0.5f * lambda / static_cast<float>(n_samples);
+        *cost += *result;
+    }
+    cublasDestroy(handle);
 }
 
 void ComputeCostSerial(const float *AL, const int *Y, const int n_samples, float *cost, float *d_cost)
@@ -243,16 +294,19 @@ void BackwardCuda2(const int n, const int *Y, const float *A, float *dA) {
 // Returns gradients of cost function with respect to W matrix and b vector
 // In order to utilize the push_back method of vector data structure, grads
 void BackwardCuda(const float *W, const float *B, const float *Z, const float *A, const float *X, const int *Y,
-                  const float *oneVec, const int *layer_dims, const int num_layers, const int n_samples,
-                  const int *W_index, const int *B_index, const int *Z_index, float *dW, float *dB, float *dZ, float *dA)
+                  const float *oneVec, const int *layer_dims, const float *layer_dropouts, const bool dropout,
+                  const int num_layers, const int n_samples, const float lambda, const int *W_index,
+                  const int *B_index, const int *Z_index, float *dW, float *dB, float *dZ, float *dA, const float *D)
 {
     int m, n, k, lda, ldb, ldc, n_elements;
     float alf1 = 1.0f;
     float alf2 = 1.0f / n_samples;
-    float bet = 0.0f;
+    float bet1 = 0.0f;
+    float bet2 = lambda / n_samples;
     const float *alpha1 = &alf1;
     const float *alpha2 = &alf2;
-    const float *beta = &bet;
+    const float *beta1 = &bet1;
+    const float *beta2 = &bet2;
     int incx = 1, incy = 1;
     int W_curLoc, B_curLoc, Z_curLoc, Z_nexLoc;
     cublasHandle_t handle;
@@ -262,9 +316,11 @@ void BackwardCuda(const float *W, const float *B, const float *Z, const float *A
     n_elements = Z_index[num_layers]-Z_index[num_layers-1];
 
     int nBlocks = (n_elements + nThreads - 1) / nThreads;
+    // Compute dA of the last layer
     BackwardCuda2<<<nBlocks, nThreads>>>(n_elements, Y, A+Z_curLoc, dA+Z_curLoc);
 
     int l;
+    // Backpropagation from the last layer to the second layer
     for (l = num_layers; l > 1; --l) {
         W_curLoc = W_index[l-1];
         B_curLoc = B_index[l-1];
@@ -273,33 +329,51 @@ void BackwardCuda(const float *W, const float *B, const float *Z, const float *A
         n_elements = Z_index[l] - Z_index[l-1];
 
         nBlocks = (n_elements + nThreads - 1) / nThreads;
+
+        // Compute dZ
         if (l == num_layers)
             SigmoidBackwardCuda<<<nBlocks, nThreads>>>(n_elements, dA+Z_curLoc, A+Z_curLoc, dZ+Z_curLoc);
         else
             ReluBackwardCuda<<<nBlocks, nThreads>>>(n_elements, dA+Z_curLoc, Z+Z_curLoc, dZ+Z_curLoc);
 
+        // Compute dB
         m = layer_dims[l];
         n = n_samples;
         lda = m;
-        cublasSgemv(handle, CUBLAS_OP_N, m, n, alpha2, dZ+Z_curLoc, lda, oneVec, incx, beta, dB+B_curLoc, incy);
+        cublasSgemv(handle, CUBLAS_OP_N, m, n, alpha2, dZ+Z_curLoc, lda, oneVec, incx, beta1, dB+B_curLoc, incy);
 
+        // Compute dW
         m = layer_dims[l];
         n = layer_dims[l-1];
         k = n_samples;
         lda = m;
         ldb = n;
         ldc = m;
-        cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, m, n, k, alpha2, dZ+Z_curLoc, lda,  A+Z_nexLoc, ldb, beta, dW+W_curLoc, ldc);
+        if (lambda != 0.0f)
+            // With L2 regularization
+            cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, m, n, k, alpha2, dZ+Z_curLoc, lda,  A+Z_nexLoc, ldb, beta2, dW+W_curLoc, ldc);
+        else
+            // Without L2 regularization
+            cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, m, n, k, alpha2, dZ+Z_curLoc, lda,  A+Z_nexLoc, ldb, beta1, dW+W_curLoc, ldc);
 
+        // Compute dA
         m = layer_dims[l-1];
         n = n_samples;
         k = layer_dims[l];
         lda = k;
         ldb = k;
         ldc = m;
-        cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, m, n, k, alpha1, W+W_curLoc, lda, dZ+Z_curLoc, ldb, beta, dA+Z_nexLoc, ldc);
+        cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, m, n, k, alpha1, W+W_curLoc, lda, dZ+Z_curLoc, ldb, beta1, dA+Z_nexLoc, ldc);
+
+        // Apply dropout regularization
+        if (dropout && layer_dropouts[l-1] < 1.0f) {
+            float keep_prob = layer_dropouts[l-1];
+            nBlocks = (n * k + nThreads - 1) / nThreads;
+            DropOutCuda<<<nBlocks, nThreads>>>(keep_prob, n*k, dA+Z_nexLoc, D+Z_nexLoc);
+        }
     }
 
+    // Backpropagation for the first Layer
     l = 1;
     W_curLoc = W_index[l-1];
     B_curLoc = B_index[l-1];
@@ -307,20 +381,29 @@ void BackwardCuda(const float *W, const float *B, const float *Z, const float *A
     n_elements = Z_index[l] - Z_index[l-1];
 
     nBlocks = (n_elements + nThreads - 1) / nThreads;
+
+    // Compute dZ
     ReluBackwardCuda<<<nBlocks, nThreads>>>(n_elements, dA+Z_curLoc, A+Z_curLoc, dZ+Z_curLoc);
 
+    // Compute dB
     m = layer_dims[l];
     n = n_samples;
     lda = m;
-    cublasSgemv(handle, CUBLAS_OP_N, m, n, alpha2, dZ+Z_curLoc, lda, oneVec, incx, beta, dB+B_curLoc, incy);
+    cublasSgemv(handle, CUBLAS_OP_N, m, n, alpha2, dZ+Z_curLoc, lda, oneVec, incx, beta1, dB+B_curLoc, incy);
 
+    // Compute dW. Use X instead of A
     m = layer_dims[l];
     n = layer_dims[l-1];
     k = n_samples;
     lda = m;
     ldb = n;
     ldc = m;
-    cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, m, n, k, alpha2, dZ+Z_curLoc, lda,  X, ldb, beta, dW+W_curLoc, ldc);
+    if (lambda != 0.0f)
+        // With L2 regularization
+        cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, m, n, k, alpha2, dZ+Z_curLoc, lda,  X, ldb, beta2, dW+W_curLoc, ldc);
+    else
+        // Without L2 regularization
+        cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, m, n, k, alpha2, dZ+Z_curLoc, lda,  X, ldb, beta1, dW+W_curLoc, ldc);
 
     cublasDestroy(handle);
 }
