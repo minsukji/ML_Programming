@@ -1,0 +1,3 @@
+catch2 tests compilation
+g++ -std=c++14 main_test.cpp
+nvcc -std=c++14 activation_func_test.cu main_test.o activation_func.cu -o activation_func_test
