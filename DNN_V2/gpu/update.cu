@@ -14,6 +14,9 @@ void UpdateW(const int n_W, float *W, const float *dW, const float learn_rate) {
     W[i] -= learn_rate * dW[i];
 }
 
+// Update parameters W and B using gradients dW, dB and learning rate
+// Not used if momentum optimizer is used (see momentum.cu instead)
+// Not used if ADAM optimizer is used (see adam.cu instead)
 void UpdateParameters(const int n_W, float *W, const float *dW,
                       const int n_B, float *B, const float *dB,
                       const float learn_rate) {

@@ -42,9 +42,9 @@ void InitializeW(const int num_layers, const int *layer_dims,
 }
 
 void InitializeParameters(const int num_layers, const int *layer_dims,
-                          const int *W_index, float *W, const int *Z_index,
+                          const int *W_index, float *W, const int *B_index,
                           float *B, const bool he) {
-  int n {Z_index[num_layers]};
+  int n {B_index[num_layers]};
   int nBlocks = (n + nThreads - 1) / nThreads;
   InitializeB<<<nBlocks, nThreads>>>(n, B);
 
@@ -54,10 +54,10 @@ void InitializeParameters(const int num_layers, const int *layer_dims,
 // Main purpose of serial routine is comparison with/verification of cuda routine
 // Note mt19937-generated numbers are different b/w cpu & gpu even with same seed
 void InitializeParametersSerial(const int num_layers, const int *layer_dims,
-                                const int *W_index, float *W, const int *Z_index,
+                                const int *W_index, float *W, const int *B_index,
                                 float *B, const bool he) {
   // Initialize B to zero
-  int n_B {Z_index[num_layers]};
+  int n_B {B_index[num_layers]};
   float *local_B = new float[n_B] {};
   cudaMemcpy(B, local_B, n_B * sizeof(float), cudaMemcpyHostToDevice);
 

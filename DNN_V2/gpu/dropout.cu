@@ -8,6 +8,7 @@ void RandomlySelectDropout(const int n, float *D) {
   curandSetGeneratorOrdering(gen, CURAND_ORDERING_PSEUDO_BEST);
   curandSetPseudoRandomGeneratorSeed(gen, 104);
   curandGenerateUniform(gen, D, n);
+  curandDestroyGenerator(gen);
 }
 
 __global__
