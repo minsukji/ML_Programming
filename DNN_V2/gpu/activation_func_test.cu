@@ -2,7 +2,7 @@
 #include "catch2/catch.hpp"
 #include "activation_func.h"
 
-extern const int nThreads {126};
+extern const int nThreads {128};
 
 TEST_CASE("sigmoid function is computed", "[sigmoid]") {
   int n {8};

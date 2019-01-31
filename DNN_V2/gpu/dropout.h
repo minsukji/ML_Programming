@@ -1,6 +1,8 @@
 #ifndef DROPOUT_H
 #define DROPOUT_H
 
+bool CheckDropout(const int n_layers, float const *layer_dropout);
+
 void RandomlySelectDropout(const int n, float *D);
 
 __global__

@@ -1,6 +1,16 @@
 #include <curand.h>
+#include "dropout.h"
 
-extern const int nThreads;
+bool CheckDropout(const int n_layers, float const *layer_dropout) {
+  bool dropout {false};
+  for (int l = 0; l < n_layers; ++l) {
+    if (layer_dropout[l] < 1.0f) {
+      dropout = true;
+      break;
+    }
+  }
+  return dropout;
+}
 
 void RandomlySelectDropout(const int n, float *D) {
   curandGenerator_t gen;

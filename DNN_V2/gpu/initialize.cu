@@ -1,5 +1,6 @@
 #include <curand.h>
 #include <random> // for use in InitializeParametersSerial
+#include "initialize.h"
 
 extern const int nThreads;
 

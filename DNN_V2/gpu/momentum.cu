@@ -1,3 +1,5 @@
+#include "momentum.h"
+
 extern const int nThreads;
 
 __global__

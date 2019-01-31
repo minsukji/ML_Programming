@@ -1,3 +1,5 @@
+#include "update.h"
+
 extern const int nThreads;
 
 __global__

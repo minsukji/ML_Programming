@@ -1,7 +1,7 @@
 #include "cublas_v2.h"
 #include "activation_func.h"
-#include "dropout.h"
 #include "backward.h"
+#include "dropout.h"
 
 extern const int nThreads;
 

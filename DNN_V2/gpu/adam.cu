@@ -1,3 +1,5 @@
+#include "adam.h"
+
 extern const int nThreads;
 
 __global__
