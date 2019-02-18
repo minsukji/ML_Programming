@@ -19,4 +19,7 @@ void ComputeCostBinaryClassSerial(const int batch_size, const float *AL,
                                   const int *Y, const float lambda,
                                   const int n_W, const float *W, float *cost);
 
+float ComputeAccuracyBinaryClass(const int n, const float *predict_prob,
+                                 const int *out_bin, const float thres);
+
 #endif

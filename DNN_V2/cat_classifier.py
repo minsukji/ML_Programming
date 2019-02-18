@@ -30,14 +30,14 @@ test_x = test_x_flatten/255.
 
 # 4-layer model
 layer_dims = np.array([[12288], [20], [7], [5], [1]], dtype='int32', order='F')
-layer_drop = np.array([[1.0], [1.0], [1.0], [1.0], [1.0]], dtype='float32', order='F')
+layer_drop = np.array([[1.0], [0.8], [1.0], [1.0], [1.0]], dtype='float32', order='F')
 train_x_c = np.array(train_x, dtype='float32', order='F')
-#print(train_x_c.shape)
+print("train x data shape: ", train_x_c.shape)
 train_y_c = np.array(train_y, dtype='int32', order='F')
-#print(train_y_c.shape)
+print("train y data shape: ", train_y_c.shape)
 lamda = 0.0
 
-gpu_engine.setup(4, layer_dims, m_train, 209, 0.0075, "gd", lamda, layer_drop)
+gpu_engine.setup(4, layer_dims, m_train, 209, 0.0075, "adam", lamda, layer_drop)
 
 n_epochs = 2500
 shuffle = False
@@ -51,7 +51,13 @@ for l in range(0, n_epochs):
 gpu_engine.clean()
 
 #W, B = dnn_gpu.l_layer_model_gpu(train_x_c, train_y_c, layer_dims, layer_dropouts, 4, lamda, 0.0075, 3500, True)
-#test_x_c = np.array(test_x, dtype='float32', order='F')
-#test_y_c = np.array(test_y, dtype='int32', order='F')
+test_x_c = np.array(test_x, dtype='float32', order='F')
+print("test x data shape: ", test_x_c.shape)
+test_y_c = np.array(test_y, dtype='int32', order='F')
+print("test y data shape: ", test_y_c.shape)
+predict_prob = gpu_engine.predict(test_x_c.shape[1], test_x_c, test_y_c)
+#predict_prob = gpu_engine.predict(train_x_c.shape[1], train_x_c, train_y_c)
+#for i in range(0,50,5):
+#  print(predict_prob[i], "; ", predict_prob[i+1], "; ", predict_prob[i+2], "; ", predict_prob[i+3], "; ", predict_prob[i+4], "\n")
 #layer_dropouts = np.array([[1.0], [1.0], [1.0], [1.0], [1.0]], dtype='float32', order='F')
 #predict = dnn_gpu.predict(test_x_c, test_y_c, W, B, layer_dims, layer_dropouts, 4, 0.0)

@@ -44,7 +44,7 @@ void UpdateAdamB(const int n_B, float *VdB, float *SdB, float *B,
     VdB_corrected = VdB[i] / (1.0f - powf(beta1, static_cast<float>(t)));
     SdB[i] = beta2 * SdB[i] + (1.0f - beta2) * dB[i] * dB[i];
     SdB_corrected = SdB[i] / (1.0f - powf(beta2, static_cast<float>(t)));
-    B[i] -= learn_rate * VdB_corrected / (sqrtf(SdB_corrected) + epsilon);
+    B[i] -= (learn_rate * VdB_corrected / (sqrtf(SdB_corrected) + epsilon));
   }
 }
 
@@ -60,7 +60,7 @@ void UpdateAdamW(const int n_W, float *VdW, float *SdW, float *W,
     VdW_corrected = VdW[i] / (1.0f - powf(beta1, static_cast<float>(t)));
     SdW[i] = beta2 * SdW[i] + (1.0f - beta2) * dW[i] * dW[i];
     SdW_corrected = SdW[i] / (1.0f - powf(beta2, static_cast<float>(t)));
-    W[i] -= learn_rate * VdW_corrected / (sqrtf(SdW_corrected) + epsilon);
+    W[i] -= (learn_rate * VdW_corrected / (sqrtf(SdW_corrected) + epsilon));
   }
 
 }

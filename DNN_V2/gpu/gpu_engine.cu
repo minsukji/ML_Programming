@@ -1,7 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <string>
-#include <iostream>
 #include "activation_func.h"
 #include "adam.h"
 #include "backward.h"
@@ -37,6 +36,10 @@ static float *cost;
 static float lambda;
 static float *layer_drop;
 static bool dropout;
+
+static int n_predict;
+static int *Z_index_pr;
+
 static float *d_X;
 static int *d_Y;
 static float *d_W, *d_B, *d_Z, *d_A;
@@ -88,15 +91,13 @@ void Setup(const int _n_layers,
   cudaMalloc(&d_dA, Z_index[n_layers]*sizeof(float));
 
   // initialize d_W and d_B
+  he = true; // He et al. initialization
   InitializeParameters(n_layers, layer_dims, W_index, d_W, B_index, d_B, he);
   // temporary array for computing cost
   cudaMalloc(&d_cost_temp, batch_size*sizeof(float));
   // initialize one vector
   cudaMalloc(&d_oneVec, batch_size*sizeof(float));
   OneVector(batch_size, d_oneVec);
-
-  // He et al. initialization
-  he = true;
 
   // learning rate
   learn_rate = _learn_rate;
@@ -136,11 +137,46 @@ void Setup(const int _n_layers,
   py::buffer_info buf_layer_drop = _layer_drop.request();
   layer_drop = static_cast<float*>(buf_layer_drop.ptr);
   dropout = CheckDropout(n_layers, layer_drop);
+  std::cout << "dropout is : " << dropout << '\n';
   if (dropout) {
     cudaMalloc(&d_D, Z_index[n_layers] * sizeof(float));
   } else {
     d_D = nullptr;
   }
+}
+
+void Clean() {
+  cudaFree(d_X);
+  cudaFree(d_Y);
+  //cudaFree(d_W);
+  //cudaFree(d_B);
+  cudaFree(d_Z);
+  cudaFree(d_A);
+  cudaFree(d_dW);
+  cudaFree(d_dB);
+  cudaFree(d_dZ);
+  cudaFree(d_dA);
+  cudaFree(d_oneVec);
+  cudaFree(d_cost_temp);
+
+  if (optimizer == "gb") {
+    // do nothing
+  } else if (optimizer == "momentum") {
+    cudaFree(d_VdW);
+    cudaFree(d_VdB);
+  } else if (optimizer == "adam") {
+    cudaFree(d_VdW);
+    cudaFree(d_VdB);
+    cudaFree(d_SdW);
+    cudaFree(d_SdB);
+  }
+
+  if (dropout) cudaFree(d_D);
+
+  //delete[] W_index;
+  //delete[] B_index;
+  //delete[] Z_index;
+  //delete cost;
 }
 
 void Train(py::array_t<float, py::array::f_style | py::array::forcecast> _X,
@@ -151,11 +187,11 @@ void Train(py::array_t<float, py::array::f_style | py::array::forcecast> _X,
   if (shuffle || n_epoch == 0) {
     py::buffer_info buf_X = _X.request();
     float *X = static_cast<float *>(buf_X.ptr);
-    cudaMemcpy(&d_X, X, layer_dims[0]*n_samples*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_X, X, layer_dims[0]*n_samples*sizeof(float), cudaMemcpyHostToDevice);
 
     py::buffer_info buf_Y = _Y.request();
     int *Y = static_cast<int *>(buf_Y.ptr);
-    cudaMemcpy(&d_Y, Y, n_samples*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Y, Y, n_samples*sizeof(int), cudaMemcpyHostToDevice);
   }
 
   int cur_batch_size {batch_size};
@@ -199,8 +235,9 @@ void Train(py::array_t<float, py::array::f_style | py::array::forcecast> _X,
                  beta1, beta2, learn_rate, t);
     }
 
+    
     // print cost every 100 iterations
-    if (n_epoch % 100 == 0) {
+    if (n_epoch % 100 == 0 && i == n_loops-1) {
       std::cout << "Cost after epoch " << n_epoch << ": " << *cost << '\n';
     }
     ++t;
@@ -224,63 +261,63 @@ py::tuple GetWeights() {
 
   return py::make_tuple(param_W, param_B);
 }
-/*
-py::array_t<float> Predict(py::array<float, py::array::f_style | py::array::forcecast> _X,
-                           py::array<int  , py::array::f_style | py::array::forcecast> _Y) {
-  // input from python calling function
-  py::buff_info buf_X = _X.request();
-  float *X = static_cast<float *>(buf_X.ptr);
-  cudaMalloc(&d_X, layer_dims[0]*batch_size*sizeof(float));
-  cudaMemcpy(&d_X, X, layer_dims[0]*batch_size*sizeof(float), cudaMemcpyHostToDevice);
-  py::buff_info buf_Y = _Y.request();
-  int *Y = static_cast<int *>(buf_Y.ptr);
-  cudaMalloc(&d_Y, batch_size*sizeof(int));
-  cudaMemcpy(&d_Y, Y, batch_size*sizeof(int), cudaMemcpyHostToDevice);
 
-  // okay to recycle n_layers, layer_dims, d_W, d_B, W_index, B_index
-  // not okay to recycle batch_size, d_X, d_Z, d_A, Z_index, d_oneVec, d_D, layer_drop
-  Forward(n_layers, layer_dims, batch_size, d_X, d_W, d_B, d_Z, d_A,
-          W_index, B_index, Z_index, d_oneVec, layer_drop, d_D);
-}
-*/
-void Clean() {
+py::array_t<float> Predict(const int _n_predict,
+                           py::array_t<float, py::array::f_style | py::array::forcecast> _X,
+                           py::array_t<int  , py::array::f_style | py::array::forcecast> _Y) {
+  // input from python calling function
+  n_predict = _n_predict;
+  py::buffer_info buf_X = _X.request();
+  float *X = static_cast<float *>(buf_X.ptr);
+  cudaMalloc(&d_X, layer_dims[0]*n_predict*sizeof(float));
+  cudaMemcpy(d_X, X, layer_dims[0]*n_predict*sizeof(float), cudaMemcpyHostToDevice);
+  py::buffer_info buf_Y = _Y.request();
+  int *Y = static_cast<int *>(buf_Y.ptr);
+  cudaMalloc(&d_Y, n_predict*sizeof(int));
+  cudaMemcpy(d_Y, Y, n_predict*sizeof(int), cudaMemcpyHostToDevice);
+
+  Z_index_pr = new int[n_layers+1] {};
+  VectorIndex(n_layers, n_predict, layer_dims, W_index, B_index, Z_index_pr);
+  cudaMalloc(&d_Z, Z_index_pr[n_layers]*sizeof(float));
+  cudaMalloc(&d_A, Z_index_pr[n_layers]*sizeof(float));
+  cudaMalloc(&d_oneVec, n_predict*sizeof(float));
+  OneVector(n_predict, d_oneVec);
+  d_D = nullptr;
+
+  Forward(n_layers, layer_dims, n_predict, d_X, d_W, d_B, d_Z, d_A,
+          W_index, B_index, Z_index_pr, d_oneVec, layer_drop, d_D);
+
+  auto predict_prob_numpy =
+    py::array_t<float, py::array::f_style | py::array::forcecast>(n_predict);
+  py::buffer_info buf_predict_prob_numpy = predict_prob_numpy.request();
+  float *predict_prob = static_cast<float *>(buf_predict_prob_numpy.ptr);
+  cudaMemcpy(predict_prob, d_A+Z_index_pr[n_layers-1],
+             (Z_index_pr[n_layers]-Z_index_pr[n_layers-1]) * sizeof(float), cudaMemcpyDeviceToHost);
+
+  float accuracy = ComputeAccuracyBinaryClass(n_predict, predict_prob, Y, 0.5f);
+  std::cout << "Accuracy: " << accuracy << '\n' << '\n';
+
   cudaFree(d_X);
   cudaFree(d_Y);
-  cudaFree(d_W);
-  cudaFree(d_dW);
-  cudaFree(d_B);
-  cudaFree(d_dB);
   cudaFree(d_Z);
-  cudaFree(d_dZ);
   cudaFree(d_A);
-  cudaFree(d_dA);
-  cudaFree(d_cost_temp);
   cudaFree(d_oneVec);
-
-  if (optimizer == "gb") {
-    // do nothing
-  } else if (optimizer == "momentum") {
-    cudaFree(d_VdW);
-    cudaFree(d_VdB);
-  } else if (optimizer == "adam") {
-    cudaFree(d_VdW);
-    cudaFree(d_VdB);
-    cudaFree(d_SdW);
-    cudaFree(d_SdB);
-  }
-
-  if (dropout) cudaFree(d_D);
-
+  cudaFree(d_W);
+  cudaFree(d_B);
   delete[] W_index;
   delete[] B_index;
   delete[] Z_index;
+  delete[] Z_index_pr;
   delete cost;
+
+  return predict_prob_numpy;
 }
+
 
 PYBIND11_MODULE(gpu_engine, m) {
   m.def("setup", &Setup);
   m.def("train", &Train);
   m.def("get_weights", &GetWeights);
-  //m.def("predict", &Predict);
+  m.def("predict", &Predict);
   m.def("clean", &Clean); 
 }

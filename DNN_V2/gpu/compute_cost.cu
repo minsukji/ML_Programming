@@ -1,6 +1,5 @@
 #include "cublas_v2.h"
 #include "compute_cost.h"
-#include <iostream>
 
 extern const int nThreads;
 
@@ -37,7 +36,6 @@ void CostL2Regularization(const int batch_size, const int n_W, const float *W,
   //cublasSnrm2(handle, n_W, W, 1, result);
   //*result *= *result;
   *result *= 0.5f * lambda / static_cast<float>(batch_size);
-  std::cout <<"L2 reg. cost: " << *result << '\n';
   *cost += *result;
   cublasDestroy(handle);
 }
@@ -86,4 +84,16 @@ void ComputeCostBinaryClassSerial(const int batch_size, const float *AL,
   }
 
   delete[] local_AL; delete[] local_Y;
+}
+
+float ComputeAccuracyBinaryClass(const int n, const float *predict_prob,
+                                 const int *out_bin, const float thres) {
+  int temp {0};
+  int sum {0};
+  for (int i = 0; i < n; ++i) {
+    temp = (predict_prob[i] < thres) ? 0 : 1;
+    if (temp == out_bin[i]) ++sum;
+  }
+
+  return static_cast<float>(sum) / n;
 }

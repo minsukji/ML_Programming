@@ -123,3 +123,17 @@ TEST_CASE("compare costs from gpu and serial computations", "[compareCosts]") {
   cudaFree(d_AL); cudaFree(d_Y); cudaFree(d_cost_temp); cudaFree(d_W);
   delete[] AL; delete[] Y; delete[] cost_temp; delete[] W; delete[] gpu_cost; delete[] cpu_cost;
 }
+
+TEST_CASE("compute accuracy", "[accuracy]") {
+  int n {10};
+  float *predict_prob = new float[n] {0.1f, 0.9f, 0.501f, 0.499f, 0.499f, 0.501f, 0.4f, 0.65f, 0.5f, 0.1f};
+  int *out_bin = new int[n] {0, 1, 1, 0, 1, 0, 0, 1, 1, 1};
+  float thres {0.5f};
+
+  float accuracy = ComputeAccuracyBinaryClass(n, predict_prob, out_bin, thres);
+  float correct_accuracy = 0.7f;
+  REQUIRE(accuracy == Approx(correct_accuracy));
+
+  delete[] predict_prob;
+  delete[] out_bin;
+}
