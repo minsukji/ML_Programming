@@ -76,7 +76,7 @@ void InitializeParametersSerial(const int num_layers, const int *layer_dims,
       n = W_index[i] - W_index[i-1];
       start_index = W_index[i-1];
       for (int j = start_index; j < start_index+n; ++j) {
-        local_W[j] = dist(e2) / sqrt(static_cast<float>(layer_dims[i-1]));
+        local_W[j] = dist(e2) * sqrt(2.0f / static_cast<float>(layer_dims[i-1]));
       }
     }
   }

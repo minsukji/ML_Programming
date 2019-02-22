@@ -1,6 +1,5 @@
-#include "catch2/catch.hpp"
+#include "catch.hpp"
 #include "adam.h"
-#include <iostream>
 
 extern const int nThreads {128};
 

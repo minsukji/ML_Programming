@@ -1,5 +1,5 @@
 #include <limits>
-#include "catch2/catch.hpp"
+#include "catch.hpp"
 #include "forward.h"
 #include "dropout.h"
 

@@ -1,5 +1,5 @@
 #include <limits>
-#include "catch2/catch.hpp"
+#include "catch.hpp"
 #include "compute_cost.h"
 
 extern const int nThreads {128};

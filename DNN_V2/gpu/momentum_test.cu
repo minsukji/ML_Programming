@@ -1,4 +1,4 @@
-#include "catch2/catch.hpp"
+#include "catch.hpp"
 #include "momentum.h"
 
 extern const int nThreads {128};

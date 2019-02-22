@@ -92,7 +92,8 @@ void Setup(const int _n_layers,
 
   // initialize d_W and d_B
   he = true; // He et al. initialization
-  InitializeParameters(n_layers, layer_dims, W_index, d_W, B_index, d_B, he);
+  //InitializeParameters(n_layers, layer_dims, W_index, d_W, B_index, d_B, he);
+  InitializeParametersSerial(n_layers, layer_dims, W_index, d_W, B_index, d_B, he);
   // temporary array for computing cost
   cudaMalloc(&d_cost_temp, batch_size*sizeof(float));
   // initialize one vector
