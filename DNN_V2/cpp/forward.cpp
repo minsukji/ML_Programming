@@ -11,8 +11,9 @@ using std::vector;
 using std::tuple;
 
 tuple<vector<MatrixXf>, vector<MatrixXf>> Forward(
-    const int n_layers, const Ref<const MatrixXf> &X,
-    const vector<MatrixXf> &params, const Ref<const MatrixXf> &layer_drop) {
+    const Ref<const MatrixXf> &X, const vector<MatrixXf> &params,
+    const Ref<const MatrixXf> &layer_drop) {
+  int n_layers {static_cast<int>(params.size()) / 2};
   vector<MatrixXf> Z, A;
 
   int l {0};

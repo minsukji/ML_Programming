@@ -11,7 +11,6 @@ TEST_CASE("forward propagation is computed", "[forwardProp]") {
   // Input layer (2); First hidden layer (4); Output layer (1)
   // W1(4,2), B1(4,1), W2(1,4), B2(1,1)
   // Batch size (2)
-  int n_layers{2};
   MatrixXf X(2,2);
   X << 0.7f, 0.9f, 0.45f, 0.1f;
 
@@ -29,7 +28,7 @@ TEST_CASE("forward propagation is computed", "[forwardProp]") {
   SECTION("without dropout") {
     MatrixXf layer_drop(3,1);
     layer_drop << 1.0f, 1.0f, 1.0f;
-    tuple<vector<MatrixXf>, vector<MatrixXf>> result = Forward(n_layers, X, params, layer_drop);
+    tuple<vector<MatrixXf>, vector<MatrixXf>> result = Forward(X, params, layer_drop);
     vector<MatrixXf> Z = std::get<0>(result);
     vector<MatrixXf> A = std::get<1>(result);
 
