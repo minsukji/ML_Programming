@@ -10,6 +10,6 @@ using std::vector;
 
 vector<MatrixXf> Backward(const vector<MatrixXf> &params,
     const vector<MatrixXf> &Z, const vector<MatrixXf> &A,
-    const MatrixXf &X, const MatrixXi &Y);
+    const MatrixXf &X, const MatrixXi &Y, const float lambda);
 
 #endif
