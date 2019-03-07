@@ -4,7 +4,19 @@
 #include "dropout.h"
 
 using Eigen::MatrixXf;
+using Eigen::VectorXf;
+using Eigen::Ref;
 using std::vector;
+
+bool CheckDropout(const Ref<const VectorXf> layer_dropout) {
+  int n {static_cast<int>(layer_dropout.size())};
+  for (int l = 0; l < n; ++l) {
+    if (layer_dropout[l] < 1.0f) {
+      return true;
+    }
+  }
+  return false;
+}
 
 vector<MatrixXf> RandomlySelectDropout(const vector<MatrixXf> &A,
     const unsigned int seed) {

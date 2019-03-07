@@ -5,7 +5,37 @@
 #include "dropout.h"
 
 using Eigen::MatrixXf;
+using Eigen::VectorXf;
 using std::vector;
+
+TEST_CASE("check dropout", "[checkDropout]") {
+  VectorXf layer_dropout(4);
+  bool dropout;
+
+  SECTION("case 1") {
+    layer_dropout << 1.0f, 1.0f, 1.0f, 1.0f;
+    dropout = CheckDropout(layer_dropout);
+    REQUIRE(dropout == false);
+  }
+
+  SECTION("case 2") {
+    layer_dropout << 0.7f, 1.0f, 1.0f, 1.0f;
+    dropout = CheckDropout(layer_dropout);
+    REQUIRE(dropout == true);
+  }
+
+  SECTION("case 3") {
+    layer_dropout << 1.0f, 0.5f, 1.0f, 1.0f;
+    dropout = CheckDropout(layer_dropout);
+    REQUIRE(dropout == true);
+  }
+
+  SECTION("case 4") {
+    layer_dropout << 1.0f, 1.0f, 1.0f, 0.4f;
+    dropout = CheckDropout(layer_dropout);
+    REQUIRE(dropout == true);
+  }
+}
 
 TEST_CASE("compute dropout", "[dropout]") {
   // First hidden layer (3), Second hidden layer (2), Output layer (1)
@@ -54,9 +84,9 @@ TEST_CASE("compute dropout", "[dropout]") {
     R2 << 0.0f, 0.0f, 0.0f, 0.0f;
     R3 << -23.42857142857143f, 1.57142857142857f;
 
-    REQUIRE(A[0].isApprox(R1, 1.e-5));
-    REQUIRE(A[1].isApprox(R2, 1.e-5));
-    REQUIRE(A[2].isApprox(R3, 1.e-5));
+    REQUIRE(A[0].isApprox(R1, 1.e-6));
+    REQUIRE(A[1].isApprox(R2, 1.e-6));
+    REQUIRE(A[2].isApprox(R3, 1.e-6));
   }
 
 }

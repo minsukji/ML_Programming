@@ -5,7 +5,11 @@
 #include <vector>
 
 using Eigen::MatrixXf;
+using Eigen::VectorXf;
+using Eigen::Ref;
 using std::vector;
+
+bool CheckDropout(const Ref<const VectorXf> layer_dropout);
 
 vector<MatrixXf> RandomlySelectDropout(const vector<MatrixXf> &A,
     const unsigned int seed);
