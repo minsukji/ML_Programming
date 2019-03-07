@@ -6,12 +6,14 @@
 #include <tuple>
 
 using Eigen::MatrixXf;
+using Eigen::VectorXf;
 using Eigen::Ref;
 using std::vector;
 using std::tuple;
 
 tuple<vector<MatrixXf>, vector<MatrixXf>> Forward(
     const Ref<const MatrixXf> &X, const vector<MatrixXf> &params,
-    const Ref<const MatrixXf> &layer_drop);
+    bool dropout, const Ref<const VectorXf> &layer_drop,
+    vector<MatrixXf> D);
 
 #endif
