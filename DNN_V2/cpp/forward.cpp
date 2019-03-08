@@ -38,7 +38,7 @@ tuple<vector<MatrixXf>, vector<MatrixXf>> Forward(
     // Modify A if dropout is applied
     if (dropout && layer_drop[l+1] < 1.0f) {
       float keep_prob = layer_drop[l+1];
-      ApplyDropout(D, A, keep_prob);
+      ApplyDropout(D[l], A[l], keep_prob);
     }
   }
 

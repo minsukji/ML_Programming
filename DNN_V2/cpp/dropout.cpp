@@ -36,11 +36,8 @@ vector<MatrixXf> RandomlySelectDropout(
   return D;
 }
 
-void ApplyDropout(const vector<MatrixXf> &D, vector<MatrixXf> &A,
+void ApplyDropout(const Ref<const MatrixXf> &D, Ref<MatrixXf> A,
     const float keep_prob) {
-  int n_layers {static_cast<int>(A.size())};
 
-  for (int l = 0; l < n_layers; ++l) {
-    A[l] = (D[l].array() <= keep_prob).cast<float>() * A[l].array() / keep_prob;
-  }
+  A = (D.array() <= keep_prob).cast<float>() * A.array() / keep_prob;
 }
