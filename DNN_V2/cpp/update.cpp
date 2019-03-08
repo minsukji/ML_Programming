@@ -6,7 +6,7 @@ using Eigen::MatrixXf;
 using std::vector;
 
 void UpdateParameters(vector<MatrixXf> &params,
-    const vector<MatrixXf> &grads, float learn_rate) {
+    const vector<MatrixXf> &grads, const float learn_rate) {
   int n_layers {static_cast<int>(params.size()) / 2};
 
   for (int l = 1; l <= n_layers; ++l) {

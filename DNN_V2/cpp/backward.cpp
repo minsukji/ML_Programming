@@ -8,6 +8,7 @@
 using Eigen::MatrixXf;
 using Eigen::MatrixXi;
 using Eigen::VectorXf;
+using Eigen::Ref;
 using std::vector;
 
 vector<MatrixXf> Backward(const vector<MatrixXf> &params,

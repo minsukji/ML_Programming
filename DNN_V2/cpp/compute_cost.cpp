@@ -1,5 +1,6 @@
 #include <Eigen/Core>
 #include <vector>
+#include <omp.h>
 #include "compute_cost.h"
 
 using Eigen::MatrixXf;

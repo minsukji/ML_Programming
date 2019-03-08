@@ -4,7 +4,6 @@
 #include "catch.hpp"
 #include "dropout.h"
 #include "forward.h"
-#include <iostream>
 
 using Eigen::MatrixXf;
 using Eigen::VectorXf;
