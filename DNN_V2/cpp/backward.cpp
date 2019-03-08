@@ -3,14 +3,18 @@
 #include <omp.h>
 #include "activation_func.h"
 #include "backward.h"
+#include "dropout.h"
 
 using Eigen::MatrixXf;
 using Eigen::MatrixXi;
+using Eigen::VectorXf;
 using std::vector;
 
 vector<MatrixXf> Backward(const vector<MatrixXf> &params,
     const vector<MatrixXf> &Z, const vector<MatrixXf> &A,
-    const MatrixXf &X, const MatrixXi &Y, const float lambda) {
+    const MatrixXf &X, const MatrixXi &Y, const float lambda,
+    const bool dropout, const Ref<const VectorXf> &layer_drop,
+    vector<MatrixXf> D) {
   int n_layers {static_cast<int>(params.size()) / 2};
   int batch_size {static_cast<int>(A[0].cols())};
   vector<MatrixXf> grads;
@@ -45,6 +49,12 @@ vector<MatrixXf> Backward(const vector<MatrixXf> &params,
 
     // Compute dA
     dA = params[l*2-2].transpose() * dZ;
+
+    // Modify dA if dropout is applied
+    if (dropout && layer_drop[l-1] < 1.0f) {
+      float keep_prob = layer_drop[l-1];
+      ApplyDropout(D[l-2], dA, keep_prob);
+    }
   }
 
   // Backpropagation for the first layer
