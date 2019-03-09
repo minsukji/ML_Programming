@@ -6,11 +6,13 @@
 #include <tuple>
 
 using Eigen::MatrixXf;
+using Eigen::VectorXi;
+using Eigen::Ref;
 using std::vector;
 using std::tuple;
 
 tuple<vector<MatrixXf>, vector<MatrixXf>> InitializeAdam(
-    const vector<MatrixXf> &grads);
+    const Ref<const VectorXi> &layer_dims);
 
 void UpdateAdam(vector<MatrixXf> &params, const vector<MatrixXf> &grads,
     vector<MatrixXf> V, vector<MatrixXf> S, const float learn_rate,

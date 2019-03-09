@@ -5,12 +5,15 @@
 #include "adam.h"
 
 using Eigen::MatrixXf;
+using Eigen::VectorXi;
 using std::vector;
 using std::tuple;
 
 TEST_CASE("adam", "[adam]") {
   // Input layer (3); First hidden layer (2); Output layer (1)
   // W1(2,3), B1(2,1), W2(1,2), B2(1,1)
+  VectorXi layer_dims(3);
+  layer_dims << 3, 2, 1;
   MatrixXf W1(2,3), B1(2,1), W2(1,2), B2(1,1);
   W1 << 1.2f, -0.7f, 0.3f, -1.8f, 0.14f, 0.85f;
   B1 << 0.1f, 0.2f;
@@ -34,7 +37,7 @@ TEST_CASE("adam", "[adam]") {
   grads.push_back(dW1);
 
   SECTION("initialize adam") {
-    tuple<vector<MatrixXf>, vector<MatrixXf>> result = InitializeAdam(grads);
+    tuple<vector<MatrixXf>, vector<MatrixXf>> result = InitializeAdam(layer_dims);
     // V
     REQUIRE(std::get<0>(result)[0] == MatrixXf::Zero(1,1));
     REQUIRE(std::get<0>(result)[1] == MatrixXf::Zero(1,2));

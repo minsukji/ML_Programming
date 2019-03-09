@@ -4,11 +4,14 @@
 #include "momentum.h"
 
 using Eigen::MatrixXf;
+using Eigen::VectorXi;
 using std::vector;
 
 TEST_CASE("momentum", "[momentum]") {
   // Input layer (3); First hidden layer (2); Output layer (1)
   // W1(2,3), B1(2,1), W2(1,2), B2(1,1)
+  VectorXi layer_dims(3);
+  layer_dims << 3, 2, 1;
   MatrixXf W1(2,3), B1(2,1), W2(1,2), B2(1,1);
   W1 << 1.2f, -0.7f, 0.3f, -1.8f, 0.14f, 0.85f;
   B1 << 0.1f, 0.2f;
@@ -32,7 +35,7 @@ TEST_CASE("momentum", "[momentum]") {
   grads.push_back(dW1);
   
   SECTION("initialize momentum") {
-    vector<MatrixXf> V = InitializeMomentum(grads);
+    vector<MatrixXf> V = InitializeMomentum(layer_dims);
 
     REQUIRE(V[0] == MatrixXf::Zero(1,1));
     REQUIRE(V[1] == MatrixXf::Zero(1,2));

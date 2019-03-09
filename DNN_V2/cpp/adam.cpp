@@ -5,20 +5,22 @@
 #include "adam.h"
 
 using Eigen::MatrixXf;
+using Eigen::VectorXi;
+using Eigen::Ref;
 using std::vector;
 using std::tuple;
 
 tuple<vector<MatrixXf>, vector<MatrixXf>> InitializeAdam(
-    const vector<MatrixXf> &grads) {
-  int n {static_cast<int>(grads.size())};
+    const Ref<const VectorXi> &layer_dims) {
+  int n {static_cast<int>(layer_dims.size()) - 1};
   vector<MatrixXf> V, S;
 
-  // V and S have the same structure as grads
-  for (int i = 0; i < n; ++i) {
-    V.push_back(MatrixXf::Zero(grads[i].rows(), grads[i].cols()));
-    S.push_back(MatrixXf::Zero(grads[i].rows(), grads[i].cols()));
+  for (int l = n; l > 0; --l) {
+    V.push_back(MatrixXf::Zero(layer_dims[l], 1));
+    V.push_back(MatrixXf::Zero(layer_dims[l], layer_dims[l-1]));
+    S.push_back(MatrixXf::Zero(layer_dims[l], 1));
+    S.push_back(MatrixXf::Zero(layer_dims[l], layer_dims[l-1]));
   }
-
   return std::make_tuple(V, S);
 }
 
